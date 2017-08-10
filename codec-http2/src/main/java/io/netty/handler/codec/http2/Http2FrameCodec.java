@@ -322,12 +322,12 @@ public class Http2FrameCodec extends Http2ConnectionHandler {
         }
 
         int lastStreamCreated = connection().remote().lastStreamCreated();
-        int lastStreamId = lastStreamCreated + frame.extraStreamIds() * 2;
+        long lastStreamId = lastStreamCreated + ((long) frame.extraStreamIds()) * 2;
         // Check if the computation overflowed.
-        if (lastStreamId < lastStreamCreated) {
+        if (lastStreamId > Integer.MAX_VALUE) {
             lastStreamId = Integer.MAX_VALUE;
         }
-        goAway(ctx, lastStreamId, frame.errorCode(), frame.content(), promise);
+        goAway(ctx, (int) lastStreamId, frame.errorCode(), frame.content(), promise);
     }
 
     private void writeHeadersFrame(
