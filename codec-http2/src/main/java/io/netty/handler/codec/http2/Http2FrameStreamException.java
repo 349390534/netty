@@ -18,6 +18,8 @@ package io.netty.handler.codec.http2;
 
 import io.netty.util.internal.UnstableApi;
 
+import static io.netty.util.internal.ObjectUtil.checkNotNull;
+
 /**
  * A HTTP/2 exception for a specific {@link Http2FrameStream}.
  */
@@ -31,8 +33,8 @@ public final class Http2FrameStreamException extends Exception {
 
     public Http2FrameStreamException(Http2FrameStream stream, Http2Error error, Throwable cause) {
         super(cause.getMessage(), cause);
-        this.stream = stream;
-        this.error = error;
+        this.stream = checkNotNull(stream, "stream");
+        this.error = checkNotNull(error, "error");
     }
 
     public Http2Error error() {

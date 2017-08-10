@@ -388,7 +388,6 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
 
     // Allow to extend for testing
     static class Http2MultiplexCodecStream extends DefaultHttp2FrameStream {
-
         DefaultHttp2StreamChannel channel;
     }
 
@@ -669,18 +668,11 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
             return pipeline().voidPromise();
         }
 
-        /**
-         * Returns the ID of this channel.
-         */
         @Override
         public int hashCode() {
             return id().hashCode();
         }
 
-        /**
-         * Returns {@code true} if and only if the specified object is identical
-         * with this channel (i.e: {@code this == o}).
-         */
         @Override
         public boolean equals(Object o) {
             return this == o;
