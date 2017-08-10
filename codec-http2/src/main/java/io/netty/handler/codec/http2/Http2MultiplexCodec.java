@@ -49,7 +49,6 @@ import java.nio.channels.ClosedChannelException;
 import java.util.ArrayDeque;
 import java.util.Queue;
 
-import static io.netty.handler.codec.http2.Http2CodecUtil.isOutboundStream;
 import static io.netty.handler.codec.http2.Http2CodecUtil.isStreamIdValid;
 import static java.lang.Math.min;
 
@@ -317,7 +316,7 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
                 public boolean visit(Http2FrameStream stream) {
                     final int streamId = stream.id();
                     final DefaultHttp2StreamChannel childChannel = ((Http2MultiplexCodecStream) stream).channel;
-                    if (streamId > goAwayFrame.lastStreamId() && isOutboundStream(connection().isServer(), streamId)) {
+                    if (streamId > goAwayFrame.lastStreamId() && connection().local().isValidStreamId(streamId)) {
                         childChannel.pipeline().fireUserEventTriggered(goAwayFrame.retainedDuplicate());
                     }
                     return true;
