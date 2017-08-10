@@ -75,6 +75,9 @@ public final class DefaultHttp2DataFrame extends AbstractHttp2StreamFrame implem
         this.endStream = endStream;
         verifyPadding(padding);
         this.padding = padding;
+        if (content().readableBytes() + (long) padding > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("content + padding must be <= Integer.MAX_VALUE");
+        }
         initialFlowControlledBytes = content().readableBytes() + padding;
     }
 
