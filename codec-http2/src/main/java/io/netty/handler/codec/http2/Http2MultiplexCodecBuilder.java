@@ -16,6 +16,7 @@
 package io.netty.handler.codec.http2;
 
 import io.netty.channel.ChannelHandler;
+import io.netty.channel.ChannelHandlerAdapter;
 import io.netty.util.internal.UnstableApi;
 
 import static io.netty.util.internal.ObjectUtil.checkNotNull;
@@ -38,7 +39,15 @@ public class Http2MultiplexCodecBuilder
      */
     Http2MultiplexCodecBuilder(boolean server, ChannelHandler childHandler) {
         server(server);
-        this.childHandler = Http2MultiplexCodec.checkSharable(checkNotNull(childHandler, "childHandler"));
+        this.childHandler = checkSharable(checkNotNull(childHandler, "childHandler"));
+    }
+
+    private static ChannelHandler checkSharable(ChannelHandler handler) {
+        if ((handler instanceof ChannelHandlerAdapter && !((ChannelHandlerAdapter) handler).isSharable()) ||
+                !handler.getClass().isAnnotationPresent(ChannelHandler.Sharable.class)) {
+            throw new IllegalArgumentException("The handler must be Sharable");
+        }
+        return handler;
     }
 
     /**
@@ -149,7 +158,6 @@ public class Http2MultiplexCodecBuilder
     @Override
     protected Http2MultiplexCodec build(
             Http2ConnectionDecoder decoder, Http2ConnectionEncoder encoder, Http2Settings initialSettings) {
-        return new Http2MultiplexCodec(
-                encoder, decoder, initialSettings, childHandler);
+        return new Http2MultiplexCodec(encoder, decoder, initialSettings, childHandler);
     }
 }

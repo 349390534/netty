@@ -22,7 +22,6 @@ import io.netty.channel.ChannelConfig;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelHandlerAdapter;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelId;
 import io.netty.channel.ChannelMetadata;
@@ -171,14 +170,6 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
         this.inboundStreamHandler = inboundStreamHandler;
     }
 
-    static ChannelHandler checkSharable(ChannelHandler handler) {
-        if ((handler instanceof ChannelHandlerAdapter && !((ChannelHandlerAdapter) handler).isSharable()) ||
-                !handler.getClass().isAnnotationPresent(Sharable.class)) {
-            throw new IllegalArgumentException("The handler must be Sharable");
-        }
-        return handler;
-    }
-
     private static void registerDone(ChannelFuture future) {
         // Handle any errors that occurred on the local thread while registering. Even though
         // failures can happen after this point, they will be handled by the channel by closing the
@@ -288,25 +279,32 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
     }
 
     private void onHttp2StreamFrame(DefaultHttp2StreamChannel childChannel, Http2StreamFrame frame) {
-        if (!childChannel.fireChildRead(frame)) {
-            if (childChannel.fireChildReadComplete()) {
-                flushNeeded = true;
-            }
+        switch (childChannel.fireChildRead(frame)) {
+            case READ_PROCESSED_BUT_STOP_READING:
+                if (childChannel.fireChildReadComplete()) {
+                    flushNeeded = true;
+                }
+                break;
+            case READ_PROCESSED_OK_TO_PROCESS_MORE:
+                if (!childChannel.fireChannelReadPending) {
+                    assert childChannel.next == null;
 
-            // Just called fireChildReadComplete() no need to do again in channelReadComplete(...)
-            childChannel.fireChannelReadPending = false;
-        } else if (!childChannel.fireChannelReadPending) {
-
-            assert childChannel.next == null;
-
-            if (tail == null) {
-                assert head == null;
-                tail = head = childChannel;
-            } else {
-                tail.next = childChannel;
-                tail = childChannel;
-            }
-            childChannel.fireChannelReadPending = true;
+                    if (tail == null) {
+                        assert head == null;
+                        tail = head = childChannel;
+                    } else {
+                        tail.next = childChannel;
+                        tail = childChannel;
+                    }
+                    childChannel.fireChannelReadPending = true;
+                }
+                break;
+            case READ_IGNORED_CHANNEL_INACTIVE:
+            case READ_QUEUED:
+                // nothing to do:
+                break;
+            default:
+                throw new Error();
         }
     }
 
@@ -383,6 +381,13 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
     static class Http2MultiplexCodecStream extends DefaultHttp2FrameStream {
 
         DefaultHttp2StreamChannel channel;
+    }
+
+    private enum ReadState {
+        READ_QUEUED,
+        READ_IGNORED_CHANNEL_INACTIVE,
+        READ_PROCESSED_BUT_STOP_READING,
+        READ_PROCESSED_OK_TO_PROCESS_MORE
     }
 
     // TODO: Handle writability changes due writing from outside the eventloop.
@@ -706,24 +711,24 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
          * Receive a read message. This does not notify handlers unless a read is in progress on the
          * channel.
          */
-        boolean fireChildRead(Http2Frame frame) {
+        ReadState fireChildRead(Http2Frame frame) {
             assert eventLoop().inEventLoop();
             if (!isActive()) {
                 ReferenceCountUtil.release(frame);
-            } else {
-                if (readInProgress) {
-                    assert inboundBuffer == null || inboundBuffer.isEmpty();
-                    // Check for null because inboundBuffer doesn't support null; we want to be consistent
-                    // for what values are supported.
-                    RecvByteBufAllocator.ExtendedHandle allocHandle = unsafe.recvBufAllocHandle();
-                    unsafe.doRead0(frame, allocHandle);
-                    return allocHandle.continueReading();
-                } else {
-                    inboundBuffer().add(frame);
-                }
+                return ReadState.READ_IGNORED_CHANNEL_INACTIVE;
             }
-
-            return false;
+            if (readInProgress) {
+                assert inboundBuffer == null || inboundBuffer.isEmpty();
+                // Check for null because inboundBuffer doesn't support null; we want to be consistent
+                // for what values are supported.
+                RecvByteBufAllocator.ExtendedHandle allocHandle = unsafe.recvBufAllocHandle();
+                unsafe.doRead0(frame, allocHandle);
+                return allocHandle.continueReading() ?
+                        ReadState.READ_PROCESSED_OK_TO_PROCESS_MORE : ReadState.READ_PROCESSED_BUT_STOP_READING;
+            } else {
+                inboundBuffer().add(frame);
+                return ReadState.READ_QUEUED;
+            }
         }
 
         boolean fireChildReadComplete() {

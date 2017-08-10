@@ -30,7 +30,6 @@ import io.netty.handler.codec.http.HttpServerUpgradeHandler.UpgradeEvent;
 import io.netty.util.ReferenceCountUtil;
 
 import io.netty.util.ReferenceCounted;
-import io.netty.util.internal.PromiseNotificationUtil;
 import io.netty.util.internal.UnstableApi;
 import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
@@ -62,8 +61,7 @@ import static io.netty.handler.codec.http2.Http2CodecUtil.HTTP_UPGRADE_STREAM_ID
  *
  * <h3>Flow control</h3>
  *
- * The frame codec automatically increments stream and connection flow control windows. It's possible to customize
- * when flow control windows are updated via {@link Http2FrameCodecBuilder#windowUpdateRatio(float)}.
+ * The frame codec automatically increments stream and connection flow control windows.
  *
  * <p>Incoming flow controlled frames need to be consumed by writing a {@link Http2WindowUpdateFrame} with the consumed
  * number of bytes and the corresponding stream identifier set to the frame codec.
