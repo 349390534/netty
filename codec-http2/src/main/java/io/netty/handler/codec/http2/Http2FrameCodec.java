@@ -430,9 +430,7 @@ public class Http2FrameCodec extends Http2ConnectionHandler {
 
     /**
      * Exceptions for unknown streams, that is streams that have no {@link Http2FrameStream} object attached
-     * are simply logged and replied to by sending a RST_STREAM frame. There is not much value in propagating such
-     * exceptions through the pipeline, as a user will not have any additional information / state about this
-     * stream and thus can't do any meaningful error handling.
+     * are simply logged and replied to by sending a RST_STREAM frame.
      */
     @Override
     protected final void onStreamError(ChannelHandlerContext ctx, Throwable cause,
@@ -440,7 +438,7 @@ public class Http2FrameCodec extends Http2ConnectionHandler {
         int streamId = streamException.streamId();
         Http2Stream connectionStream = connection().stream(streamId);
         if (connectionStream == null) {
-            LOG.warn("Stream exception thrown for unkown stream.", cause);
+            onHttp2UnknownStreamError(ctx, cause, streamException);
             // Write a RST_STREAM
             super.onStreamError(ctx, cause, streamException);
             return;
@@ -455,6 +453,12 @@ public class Http2FrameCodec extends Http2ConnectionHandler {
         }
 
         onHttp2FrameStreamException(ctx, new Http2FrameStreamException(stream, streamException.error(), cause));
+    }
+
+    void onHttp2UnknownStreamError(@SuppressWarnings("unused") ChannelHandlerContext ctx, Throwable cause,
+                                   Http2Exception.StreamException streamException) {
+        // Just log....
+        LOG.warn("Stream exception thrown for unkown stream {}.", streamException.streamId(), cause);
     }
 
     @Override

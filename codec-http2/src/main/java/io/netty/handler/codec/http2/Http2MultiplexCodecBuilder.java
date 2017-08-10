@@ -30,13 +30,6 @@ public class Http2MultiplexCodecBuilder
 
     final ChannelHandler childHandler;
 
-    /**
-     * Creates a new {@link Http2MultiplexCodec} builder.
-     *
-     * @param server {@code true} this is a server
-     * @param childHandler the handler added to channels for remotely-created streams. It must be
-     *     {@link ChannelHandler.Sharable}.
-     */
     Http2MultiplexCodecBuilder(boolean server, ChannelHandler childHandler) {
         server(server);
         this.childHandler = checkSharable(checkNotNull(childHandler, "childHandler"));
@@ -52,6 +45,9 @@ public class Http2MultiplexCodecBuilder
 
     /**
      * Creates a builder for a HTTP/2 client.
+     *
+     * @param childHandler the handler added to channels for remotely-created streams. It must be
+     *     {@link ChannelHandler.Sharable}.
      */
     public static Http2MultiplexCodecBuilder forClient(ChannelHandler childHandler) {
         return new Http2MultiplexCodecBuilder(false, childHandler);
@@ -59,6 +55,9 @@ public class Http2MultiplexCodecBuilder
 
     /**
      * Creates a builder for a HTTP/2 server.
+     *
+     * @param childHandler the handler added to channels for remotely-created streams. It must be
+     *     {@link ChannelHandler.Sharable}.
      */
     public static Http2MultiplexCodecBuilder forServer(ChannelHandler childHandler) {
         return new Http2MultiplexCodecBuilder(true, childHandler);

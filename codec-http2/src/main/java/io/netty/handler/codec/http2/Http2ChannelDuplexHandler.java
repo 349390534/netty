@@ -20,6 +20,7 @@ import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPipeline;
 import io.netty.util.internal.StringUtil;
+import io.netty.util.internal.UnstableApi;
 
 /**
  * A {@link ChannelDuplexHandler} providing additional functionality for HTTP/2. Specifically it allows to:
@@ -31,6 +32,7 @@ import io.netty.util.internal.StringUtil;
  * <p>The {@link Http2FrameCodec} is required to be part of the {@link ChannelPipeline} before this handler is added,
  * or else an {@link IllegalStateException} will be thrown.
  */
+@UnstableApi
 public abstract class Http2ChannelDuplexHandler extends ChannelDuplexHandler {
 
     private volatile Http2FrameCodec frameCodec;
@@ -47,8 +49,11 @@ public abstract class Http2ChannelDuplexHandler extends ChannelDuplexHandler {
 
     @Override
     public final void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
-        handlerRemoved0(ctx);
-        frameCodec = null;
+        try {
+            handlerRemoved0(ctx);
+        } finally {
+            frameCodec = null;
+        }
     }
 
     protected void handlerRemoved0(@SuppressWarnings("unused") ChannelHandlerContext ctx) throws Exception {
@@ -61,11 +66,12 @@ public abstract class Http2ChannelDuplexHandler extends ChannelDuplexHandler {
      * <p>This method is <em>thread-safe</em>.
      */
     public final Http2FrameStream newStream() {
-        if (frameCodec == null) {
+        Http2FrameCodec codec = frameCodec;
+        if (codec == null) {
             throw new IllegalStateException(StringUtil.simpleClassName(Http2FrameCodec.class) + " not found." +
                     " Has the handler been added to a pipeline?");
         }
-        return frameCodec.newStream();
+        return codec.newStream();
     }
 
     /**
