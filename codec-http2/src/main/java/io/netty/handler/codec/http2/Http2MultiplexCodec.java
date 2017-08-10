@@ -112,8 +112,8 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
     private static final ClosedChannelException CLOSED_CHANNEL_EXCEPTION = ThrowableUtil.unknownStackTrace(
             new ClosedChannelException(), DefaultHttp2StreamChannel.Http2ChannelUnsafe.class, "write(...)");
     /**
-     * Number of bytes to consider non-payload messages, to determine when to stop reading. 9 is
-     * arbitrary, but also the minimum size of an HTTP/2 frame. Primarily is non-zero.
+     * Number of bytes to consider non-payload messages. 9 is arbitrary, but also the minimum size of an HTTP/2 frame.
+     * Primarily is non-zero.
      */
     private static final int ARBITRARY_MESSAGE_SIZE = 9;
 
@@ -127,7 +127,8 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
         static final MessageSizeEstimator.Handle HANDLE_INSTANCE = new MessageSizeEstimator.Handle() {
             @Override
             public int size(Object msg) {
-                return msg instanceof Http2DataFrame ? ((Http2DataFrame) msg).initialFlowControlledBytes() : 0;
+                return msg instanceof Http2DataFrame ?
+                        ((Http2DataFrame) msg).initialFlowControlledBytes() : ARBITRARY_MESSAGE_SIZE;
             }
         };
 
@@ -162,7 +163,7 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
     private DefaultHttp2StreamChannel head;
     private DefaultHttp2StreamChannel tail;
 
-    // volatile as it is accessed from the DefaultHttp2StreamChannel in a multi-threaded way.
+    // Need to be volatile as accessed from within the DefaultHttp2StreamChannel in a multi-threaded fashion.
     volatile ChannelHandlerContext ctx;
 
     Http2MultiplexCodec(Http2ConnectionEncoder encoder, Http2ConnectionDecoder decoder, Http2Settings initialSettings,
