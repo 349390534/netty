@@ -207,7 +207,7 @@ public class Http2FrameCodec extends Http2ConnectionHandler {
 
     private void tryExpandConnectionFlowControlWindow(Http2Connection connection) throws Http2Exception {
         if (initialFlowControlWindowSize != null) {
-            // The window size int the settings explicitly excludes the connection window. So we manually manipulate the
+            // The window size in the settings explicitly excludes the connection window. So we manually manipulate the
             // connection window to accommodate more concurrent data per connection.
             Http2Stream connectionStream = connection.connectionStream();
             Http2LocalFlowController localFlowController = connection.local().flowController();
@@ -424,8 +424,11 @@ public class Http2FrameCodec extends Http2ConnectionHandler {
     }
 
     @Override
-    protected final void onConnectionError(ChannelHandlerContext ctx, Throwable cause, Http2Exception http2Ex) {
+    protected void onConnectionError(ChannelHandlerContext ctx, Throwable cause, Http2Exception http2Ex) {
+        // allow the user to handle it first in the pipeline, and then automatically clean up.
+        // If this is not desired behavior the user can override this method.
         ctx.fireExceptionCaught(cause);
+        super.onConnectionError(ctx, cause, http2Ex);
     }
 
     /**

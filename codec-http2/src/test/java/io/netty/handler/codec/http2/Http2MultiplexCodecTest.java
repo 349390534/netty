@@ -368,29 +368,6 @@ public class Http2MultiplexCodecTest {
     }
 
     @Test
-    public void outboundStreamShouldWriteGoAwayWithoutReset() {
-        childChannelInitializer.handler = new ChannelInboundHandlerAdapter() {
-            @Override
-            public void channelActive(ChannelHandlerContext ctx) throws Exception {
-                ctx.writeAndFlush(new DefaultHttp2GoAwayFrame(Http2Error.NO_ERROR));
-                ctx.fireChannelActive();
-            }
-        };
-        Channel childChannel = newOutboundStream();
-        assertTrue(childChannel.isActive());
-
-        Http2GoAwayFrame goAwayFrame = parentChannel.readOutbound();
-        assertNotNull(goAwayFrame);
-        goAwayFrame.release();
-
-        childChannel.close();
-        parentChannel.runPendingTasks();
-
-        Http2ResetFrame reset = parentChannel.readOutbound();
-        assertNull(reset);
-    }
-
-    @Test
     public void outboundFlowControlWritability() {
         Http2StreamChannel childChannel = newOutboundStream();
         assertTrue(childChannel.isActive());

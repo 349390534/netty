@@ -29,7 +29,6 @@ import io.netty.channel.ChannelOutboundBuffer;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.ChannelProgressivePromise;
 import io.netty.channel.ChannelPromise;
-import io.netty.channel.ChannelPromiseNotifier;
 import io.netty.channel.DefaultChannelConfig;
 import io.netty.channel.DefaultChannelPipeline;
 import io.netty.channel.DefaultMaxMessagesRecvByteBufAllocator;
@@ -42,6 +41,7 @@ import io.netty.channel.WriteBufferWaterMark;
 import io.netty.util.DefaultAttributeMap;
 import io.netty.util.ReferenceCountUtil;
 import io.netty.util.ReferenceCounted;
+import io.netty.util.internal.StringUtil;
 import io.netty.util.internal.ThrowableUtil;
 import io.netty.util.internal.UnstableApi;
 
@@ -95,9 +95,7 @@ import static java.lang.Math.min;
  * when it maps to an active HTTP/2 stream and the stream's flow control window is greater than zero. A child channel
  * does not know about the connection-level flow control window. {@link ChannelHandler}s are free to ignore the
  * channel's writability, in which case the excessive writes will be buffered by the parent channel. It's important to
- * note that only {@link Http2DataFrame}s are subject to HTTP/2 flow control. So it's perfectly legal (and expected)
- * by a handler that aims to respect the channel's writability to e.g. write a {@link Http2DataFrame} even if the
- * channel is marked unwritable.
+ * note that only {@link Http2DataFrame}s are subject to HTTP/2 flow control.
  */
 @UnstableApi
 public class Http2MultiplexCodec extends Http2FrameCodec {
@@ -901,10 +899,6 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
                 pipeline().fireChannelReadComplete();
             }
 
-            /**
-             * Returns whether reads should continue. The only reason reads shouldn't continue is that the
-             * channel was just closed.
-             */
             @SuppressWarnings("deprecation")
             void doRead0(Http2Frame frame, RecvByteBufAllocator.Handle allocHandle) {
                 int numBytesToBeConsumed = 0;
@@ -943,7 +937,6 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
                 try {
                     if (msg instanceof Http2StreamFrame) {
                         Http2StreamFrame frame = validateStreamFrame((Http2StreamFrame) msg).stream(stream());
-
                         if (!firstFrameWritten && !isStreamIdValid(stream().id())) {
                             if (!(frame instanceof Http2HeadersFrame)) {
                                 ReferenceCountUtil.release(frame);
@@ -966,11 +959,12 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
                             }
                             return;
                         }
-                    } else if (!(msg instanceof Http2GoAwayFrame)) {
+                    } else  {
                         String msgStr = msg.toString();
                         ReferenceCountUtil.release(msg);
                         promise.setFailure(new IllegalArgumentException(
-                                "Message must be an Http2GoAwayFrame or Http2StreamFrame: " + msgStr));
+                                "Message must be an " + StringUtil.simpleClassName(Http2StreamFrame.class) +
+                                        ": " + msgStr));
                         return;
                     }
 
