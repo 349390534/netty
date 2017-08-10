@@ -172,6 +172,6 @@ public class Http2FrameCodecBuilder extends
     @Override
     protected Http2FrameCodec build(
             Http2ConnectionDecoder decoder, Http2ConnectionEncoder encoder, Http2Settings initialSettings) {
-        return new Http2FrameCodec(encoder, decoder, initialSettings, gracefulShutdownTimeoutMillis());
+        return new Http2FrameCodec(encoder, decoder, initialSettings);
     }
 }

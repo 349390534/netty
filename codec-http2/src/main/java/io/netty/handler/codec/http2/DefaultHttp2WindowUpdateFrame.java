@@ -17,8 +17,6 @@ package io.netty.handler.codec.http2;
 
 import io.netty.util.internal.UnstableApi;
 
-import static io.netty.util.internal.ObjectUtil.checkPositive;
-
 /**
  * The default {@link Http2WindowUpdateFrame} implementation.
  */
@@ -28,7 +26,7 @@ public class DefaultHttp2WindowUpdateFrame extends AbstractHttp2StreamFrame impl
     private final int windowUpdateIncrement;
 
     public DefaultHttp2WindowUpdateFrame(int windowUpdateIncrement) {
-        this.windowUpdateIncrement = checkPositive(windowUpdateIncrement, "windowUpdateIncrement");
+        this.windowUpdateIncrement = windowUpdateIncrement;
     }
 
     @Override

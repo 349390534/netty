@@ -30,6 +30,7 @@ import io.netty.channel.ChannelOutboundBuffer;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.ChannelProgressivePromise;
 import io.netty.channel.ChannelPromise;
+import io.netty.channel.ChannelPromiseNotifier;
 import io.netty.channel.DefaultChannelConfig;
 import io.netty.channel.DefaultChannelPipeline;
 import io.netty.channel.DefaultMaxMessagesRecvByteBufAllocator;
@@ -51,7 +52,6 @@ import java.util.Queue;
 
 import static io.netty.handler.codec.http2.Http2CodecUtil.isOutboundStream;
 import static io.netty.handler.codec.http2.Http2CodecUtil.isStreamIdValid;
-import static io.netty.util.internal.ObjectUtil.checkNotNull;
 import static java.lang.Math.min;
 
 /**
@@ -70,7 +70,7 @@ import static java.lang.Math.min;
  * free to close the channel in response to such events if they don't have use for any queued
  * messages.
  *
- * <p>Outbound streams are supported via the {@link Http2StreamBootstrap}.
+ * <p>Outbound streams are supported via the {@link Http2StreamChannelBootstrap}.
  *
  * <p>{@link ChannelConfig#setMaxMessagesPerRead(int)} and {@link ChannelConfig#setAutoRead(boolean)} are supported.
  *
@@ -129,7 +129,7 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
         static final MessageSizeEstimator.Handle HANDLE_INSTANCE = new MessageSizeEstimator.Handle() {
             @Override
             public int size(Object msg) {
-                return msg instanceof Http2DataFrame ? ((Http2DataFrame) msg).flowControlledBytes() : 0;
+                return msg instanceof Http2DataFrame ? ((Http2DataFrame) msg).initialFlowControlledBytes() : 0;
             }
         };
 
@@ -165,19 +165,9 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
     // volatile as it is accessed from the DefaultHttp2StreamChannel in a multi-threaded way.
     volatile ChannelHandlerContext ctx;
 
-    /**
-     * Construct a new handler whose child channels run in a different event loop.
-     *
-     * @param server {@code true} this is a server
-     */
-    public Http2MultiplexCodec(boolean server, ChannelHandler inboundStreamHandler) {
-        super(server);
-        this.inboundStreamHandler = checkSharable(checkNotNull(inboundStreamHandler, "inboundStreamHandler"));
-    }
-
     Http2MultiplexCodec(Http2ConnectionEncoder encoder, Http2ConnectionDecoder decoder, Http2Settings initialSettings,
-                    long gracefulShutdownTimeoutMillis,  ChannelHandler inboundStreamHandler) {
-        super(encoder, decoder, initialSettings, gracefulShutdownTimeoutMillis);
+                    ChannelHandler inboundStreamHandler) {
+        super(encoder, decoder, initialSettings);
         this.inboundStreamHandler = inboundStreamHandler;
     }
 
@@ -277,11 +267,7 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
 
     @Override
     final void onHttp2StreamWritabilityChanged(ChannelHandlerContext ctx, Http2FrameStream stream, boolean writable) {
-        DefaultHttp2StreamChannel childChannel = ((Http2MultiplexCodecStream) stream).channel;
-
-        if (childChannel != null)  {
-            childChannel.writabilityChanged(writable);
-        }
+        (((Http2MultiplexCodecStream) stream).channel).writabilityChanged(writable);
     }
 
     // TODO: This is most likely not the best way to expose this, need to think more about it.
@@ -374,6 +360,8 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
                 current = current.next;
             }
         } finally {
+            tail = head = null;
+
             // We always flush as this is what Http2ConnectionHandler does for now.
             // TODO: I think this is not really necessary and we should be able to optimize this in the future.
             flush0(ctx);
@@ -460,7 +448,6 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
             } else {
                 closePending = true;
             }
-            //((Http2MultiplexCodecStream) stream).channel = null;
         }
 
         @Override
@@ -728,7 +715,7 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
                     assert inboundBuffer == null || inboundBuffer.isEmpty();
                     // Check for null because inboundBuffer doesn't support null; we want to be consistent
                     // for what values are supported.
-                    RecvByteBufAllocator.Handle allocHandle = unsafe().recvBufAllocHandle();
+                    RecvByteBufAllocator.ExtendedHandle allocHandle = unsafe.recvBufAllocHandle();
                     unsafe.doRead0(frame, allocHandle);
                     return allocHandle.continueReading();
                 } else {
@@ -759,9 +746,9 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
             private final VoidChannelPromise unsafeVoidPromise =
                     new VoidChannelPromise(DefaultHttp2StreamChannel.this, false);
             @SuppressWarnings("deprecation")
-            private RecvByteBufAllocator.Handle recvHandle;
-            private boolean flush;
-            private boolean inClose;
+            private RecvByteBufAllocator.ExtendedHandle recvHandle;
+            private boolean writeDoneAndNoFlush;
+            private ChannelPromise pendingClosePromise;
 
             @Override
             public void connect(final SocketAddress remoteAddress,
@@ -769,11 +756,10 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
                 promise.setFailure(new UnsupportedOperationException());
             }
 
-            @SuppressWarnings("deprecation")
             @Override
-            public RecvByteBufAllocator.Handle recvBufAllocHandle() {
+            public RecvByteBufAllocator.ExtendedHandle recvBufAllocHandle() {
                 if (recvHandle == null) {
-                    recvHandle = config().getRecvByteBufAllocator().newHandle();
+                    recvHandle = (RecvByteBufAllocator.ExtendedHandle) config().getRecvByteBufAllocator().newHandle();
                 }
                 return recvHandle;
             }
@@ -823,10 +809,11 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
                     promise.setFailure(new ClosedChannelException());
                     return;
                 }
-                if (inClose) {
+                if (pendingClosePromise != null) {
+                    pendingClosePromise.addListener(new ChannelPromiseNotifier(promise));
                     return;
                 }
-                inClose = true;
+                pendingClosePromise = promise;
                 try {
                     closePending = false;
                     fireChannelReadPending = false;
@@ -856,7 +843,7 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
                     promise.setSuccess();
                     closePromise.setSuccess();
                 } finally {
-                    inClose = false;
+                    pendingClosePromise = null;
                 }
             }
 
@@ -895,9 +882,11 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
 
                 do {
                     Object m = inboundBuffer.poll();
-                    if (m == null && closePending) {
-                        pipeline().fireChannelReadComplete();
-                        unsafe.closeForcibly();
+                    if (m == null) {
+                        if (closePending) {
+                            pipeline().fireChannelReadComplete();
+                            unsafe.closeForcibly();
+                        }
                         return;
                     }
                     doRead0((Http2Frame) m, allocHandle);
@@ -915,7 +904,7 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
             void doRead0(Http2Frame frame, RecvByteBufAllocator.Handle allocHandle) {
                 int numBytesToBeConsumed = 0;
                 if (frame instanceof Http2DataFrame) {
-                    numBytesToBeConsumed = ((Http2DataFrame) frame).flowControlledBytes();
+                    numBytesToBeConsumed = ((Http2DataFrame) frame).initialFlowControlledBytes();
                     allocHandle.lastBytesRead(numBytesToBeConsumed);
                 } else {
                     allocHandle.lastBytesRead(ARBITRARY_MESSAGE_SIZE);
@@ -963,7 +952,12 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
                             if (future.isDone()) {
                                 firstWriteComplete(future, promise);
                             } else {
-                                firstWriteComplete(future, promise);
+                                future.addListener(new ChannelFutureListener() {
+                                    @Override
+                                    public void operationComplete(ChannelFuture future) throws Exception {
+                                        firstWriteComplete(future, promise);
+                                    }
+                                });
                             }
                             return;
                         }
@@ -989,7 +983,7 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
                 } catch (Throwable t) {
                     promise.tryFailure(t);
                 } finally {
-                    flush = true;
+                    writeDoneAndNoFlush = true;
                 }
             }
 
@@ -1030,15 +1024,19 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
 
             @Override
             public void flush() {
-                if (flush) {
-                    // If we are current channelReadComplete(...) call we should just mark this Channel with a flush
-                    // pending. We will ensure we trigger ctx.flush() after we processed all Channels later on and so
-                    // aggregate the flushes. This is done as ctx.flush() is expensive when as it may trigger an
-                    // write(...) or writev(...) operation on the socket.
-                    if (inFireChannelReadComplete) {
-                        flushPending = true;
-                    } else {
-                        flush0(ctx);
+                if (writeDoneAndNoFlush) {
+                    try {
+                        // If we are current channelReadComplete(...) call we should just mark this Channel with a flush
+                        // pending. We will ensure we trigger ctx.flush() after we processed all Channels later on and
+                        // so aggregate the flushes. This is done as ctx.flush() is expensive when as it may trigger an
+                        // write(...) or writev(...) operation on the socket.
+                        if (inFireChannelReadComplete) {
+                            flushPending = true;
+                        } else {
+                            flush0(ctx);
+                        }
+                    } finally {
+                        writeDoneAndNoFlush = false;
                     }
                 } else {
                     // There is nothing to flush so this is a NOOP.
@@ -1110,6 +1108,16 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
             @Override
             public ChannelConfig setWriteBufferWaterMark(WriteBufferWaterMark writeBufferWaterMark) {
                 throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public ChannelConfig setRecvByteBufAllocator(RecvByteBufAllocator allocator) {
+                if (!(allocator.newHandle() instanceof RecvByteBufAllocator.ExtendedHandle)) {
+                    throw new IllegalArgumentException("allocator.newHandle() must return an object of type: " +
+                            RecvByteBufAllocator.ExtendedHandle.class);
+                }
+                super.setRecvByteBufAllocator(allocator);
+                return this;
             }
         }
     }

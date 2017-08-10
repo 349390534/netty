@@ -110,7 +110,7 @@ public class Http2MultiplexCodecBuilderTest {
     }
 
     private Http2StreamChannel newOutboundStream(ChannelHandler handler) {
-        return new Http2StreamBootstrap(clientChannel).handler(handler).open().syncUninterruptibly().getNow();
+        return new Http2StreamChannelBootstrap(clientChannel).handler(handler).open().syncUninterruptibly().getNow();
     }
 
     @Test

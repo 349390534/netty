@@ -72,7 +72,7 @@ public class Http2MultiplexCodecTest {
         writer = new Writer();
 
         parentChannel.connect(new InetSocketAddress(0));
-        codec = new TestableHttp2MultiplexCodec(true, childChannelInitializer);
+        codec = new TestableHttp2MultiplexCodecBuilder(true, childChannelInitializer).build();
         parentChannel.pipeline().addLast(codec);
         parentChannel.runPendingTasks();
 
@@ -198,7 +198,7 @@ public class Http2MultiplexCodecTest {
     }
 
     private Http2StreamChannel newOutboundStream() {
-        return new Http2StreamBootstrap(parentChannel).handler(childChannelInitializer)
+        return new Http2StreamChannelBootstrap(parentChannel).handler(childChannelInitializer)
                 .open().syncUninterruptibly().getNow();
     }
 
@@ -503,8 +503,9 @@ public class Http2MultiplexCodecTest {
      */
     private final class TestableHttp2MultiplexCodec extends Http2MultiplexCodec {
 
-        TestableHttp2MultiplexCodec(boolean server, ChannelHandler inboundStreamHandler) {
-            super(server, inboundStreamHandler);
+        public TestableHttp2MultiplexCodec(Http2ConnectionEncoder encoder, Http2ConnectionDecoder decoder,
+                                           Http2Settings initialSettings, ChannelHandler inboundStreamHandler) {
+            super(encoder, decoder, initialSettings, inboundStreamHandler);
         }
 
         void onHttp2Frame(Http2Frame frame) {
@@ -533,7 +534,7 @@ public class Http2MultiplexCodecTest {
         }
 
         @Override
-        void write0(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) {
+        public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) {
             writer.write(msg, promise);
         }
 
@@ -560,6 +561,24 @@ public class Http2MultiplexCodecTest {
             public Http2Stream.State state() {
                 return state;
             }
+        }
+    }
+
+    private final class TestableHttp2MultiplexCodecBuilder extends Http2MultiplexCodecBuilder {
+        TestableHttp2MultiplexCodecBuilder(boolean server, ChannelHandler childHandler) {
+            super(server, childHandler);
+        }
+
+        @Override
+        public TestableHttp2MultiplexCodec build() {
+            return (TestableHttp2MultiplexCodec) super.build();
+        }
+
+        @Override
+        protected Http2MultiplexCodec build(
+                Http2ConnectionDecoder decoder, Http2ConnectionEncoder encoder, Http2Settings initialSettings) {
+            return new TestableHttp2MultiplexCodec(
+                    encoder, decoder, initialSettings, childHandler);
         }
     }
 

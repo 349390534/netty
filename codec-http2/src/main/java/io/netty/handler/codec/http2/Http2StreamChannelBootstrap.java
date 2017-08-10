@@ -37,15 +37,15 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 @UnstableApi
-public final class Http2StreamBootstrap {
-    private static final InternalLogger logger = InternalLoggerFactory.getInstance(Http2StreamBootstrap.class);
+public final class Http2StreamChannelBootstrap {
+    private static final InternalLogger logger = InternalLoggerFactory.getInstance(Http2StreamChannelBootstrap.class);
 
     private final Map<ChannelOption<?>, Object> options = new LinkedHashMap<ChannelOption<?>, Object>();
     private final Map<AttributeKey<?>, Object> attrs = new LinkedHashMap<AttributeKey<?>, Object>();
     private final Channel channel;
     private volatile ChannelHandler handler;
 
-    public Http2StreamBootstrap(Channel channel) {
+    public Http2StreamChannelBootstrap(Channel channel) {
         this.channel = ObjectUtil.checkNotNull(channel, "channel");
     }
 
@@ -54,7 +54,7 @@ public final class Http2StreamBootstrap {
      * created. Use a value of {@code null} to remove a previous set {@link ChannelOption}.
      */
     @SuppressWarnings("unchecked")
-    public <T> Http2StreamBootstrap option(ChannelOption<T> option, T value) {
+    public <T> Http2StreamChannelBootstrap option(ChannelOption<T> option, T value) {
         if (option == null) {
             throw new NullPointerException("option");
         }
@@ -75,7 +75,7 @@ public final class Http2StreamBootstrap {
      * {@code null}, the attribute of the specified {@code key} is removed.
      */
     @SuppressWarnings("unchecked")
-    public <T> Http2StreamBootstrap attr(AttributeKey<T> key, T value) {
+    public <T> Http2StreamChannelBootstrap attr(AttributeKey<T> key, T value) {
         if (key == null) {
             throw new NullPointerException("key");
         }
@@ -95,11 +95,8 @@ public final class Http2StreamBootstrap {
      * the {@link ChannelHandler} to use for serving the requests.
      */
     @SuppressWarnings("unchecked")
-    public Http2StreamBootstrap handler(ChannelHandler handler) {
-        if (handler == null) {
-            throw new NullPointerException("handler");
-        }
-        this.handler = handler;
+    public Http2StreamChannelBootstrap handler(ChannelHandler handler) {
+        this.handler = ObjectUtil.checkNotNull(handler, "handler");
         return this;
     }
 

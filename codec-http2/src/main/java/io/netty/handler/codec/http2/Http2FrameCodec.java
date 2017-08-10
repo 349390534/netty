@@ -155,31 +155,10 @@ public class Http2FrameCodec extends Http2ConnectionHandler {
     /** Number of buffered streams if the {@link StreamBufferingEncoder} is used. **/
     private int numBufferedStreams;
 
-    public Http2FrameCodec(boolean server) {
-        this(server, null);
-    }
-
-    public Http2FrameCodec(boolean server, Http2FrameLogger frameLogger) {
-        this(server, new DefaultHttp2FrameWriter(), frameLogger, Http2Settings.defaultSettings());
-    }
-
-    Http2FrameCodec(Http2ConnectionEncoder encoder, Http2ConnectionDecoder decoder, Http2Settings initialSettings,
-                    long gracefulShutdownTimeoutMillis) {
+    Http2FrameCodec(Http2ConnectionEncoder encoder, Http2ConnectionDecoder decoder, Http2Settings initialSettings) {
         super(decoder, encoder, initialSettings);
 
         decoder.frameListener(new FrameListener());
-        connection().addListener(new ConnectionListener());
-        connection().remote().flowController().listener(new Http2RemoteFlowControllerListener());
-        streamKey = connection().newKey();
-        initialFlowControlWindowSize = initialSettings.initialWindowSize();
-        gracefulShutdownTimeoutMillis(gracefulShutdownTimeoutMillis);
-    }
-
-    private Http2FrameCodec(boolean server, Http2FrameWriter frameWriter, Http2FrameLogger frameLogger,
-                    Http2Settings initialSettings) {
-        super(server, frameWriter, frameLogger, initialSettings);
-
-        decoder().frameListener(new FrameListener());
         connection().addListener(new ConnectionListener());
         connection().remote().flowController().listener(new Http2RemoteFlowControllerListener());
         streamKey = connection().newKey();
@@ -282,9 +261,9 @@ public class Http2FrameCodec extends Http2ConnectionHandler {
             } finally {
                 upgrade.release();
             }
-        } else {
-            super.userEventTriggered(ctx, evt);
+            return;
         }
+        super.userEventTriggered(ctx, evt);
     }
 
     /**
@@ -292,12 +271,7 @@ public class Http2FrameCodec extends Http2ConnectionHandler {
      * streams.
      */
     @Override
-    public final void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) {
-        write0(ctx, msg, promise);
-    }
-
-    // Allow to override for testing
-    void write0(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) {
+    public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) {
         if (msg instanceof Http2DataFrame) {
             Http2DataFrame dataFrame = (Http2DataFrame) msg;
             encoder().writeData(ctx, dataFrame.stream().id(), dataFrame.content(),
@@ -416,7 +390,7 @@ public class Http2FrameCodec extends Http2ConnectionHandler {
 
         @Override
         public void onStreamActive(Http2Stream stream) {
-            if (isOutboundStream(connection().isServer(), stream.id())) {
+            if (connection().local().isValidStreamId(stream.id())) {
                 return;
             }
 

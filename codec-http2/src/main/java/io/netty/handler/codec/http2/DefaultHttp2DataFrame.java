@@ -32,6 +32,7 @@ public final class DefaultHttp2DataFrame extends AbstractHttp2StreamFrame implem
     private final ByteBuf content;
     private final boolean endStream;
     private final int padding;
+    private final int initialFlowControlledBytes;
 
     /**
      * Equivalent to {@code new DefaultHttp2DataFrame(content, false)}.
@@ -74,6 +75,7 @@ public final class DefaultHttp2DataFrame extends AbstractHttp2StreamFrame implem
         this.endStream = endStream;
         verifyPadding(padding);
         this.padding = padding;
+        initialFlowControlledBytes = content().readableBytes() + padding;
     }
 
     @Override
@@ -106,8 +108,8 @@ public final class DefaultHttp2DataFrame extends AbstractHttp2StreamFrame implem
     }
 
     @Override
-    public int flowControlledBytes() {
-        return content().readableBytes() + padding;
+    public int initialFlowControlledBytes() {
+        return initialFlowControlledBytes;
     }
 
     @Override

@@ -24,10 +24,10 @@ import static io.netty.util.internal.ObjectUtil.checkNotNull;
  * A builder for {@link Http2MultiplexCodec}.
  */
 @UnstableApi
-public final class Http2MultiplexCodecBuilder
+public class Http2MultiplexCodecBuilder
         extends AbstractHttp2ConnectionHandlerBuilder<Http2MultiplexCodec, Http2MultiplexCodecBuilder> {
 
-    private final ChannelHandler childHandler;
+    final ChannelHandler childHandler;
 
     /**
      * Creates a new {@link Http2MultiplexCodec} builder.
@@ -36,9 +36,23 @@ public final class Http2MultiplexCodecBuilder
      * @param childHandler the handler added to channels for remotely-created streams. It must be
      *     {@link ChannelHandler.Sharable}.
      */
-    public Http2MultiplexCodecBuilder(boolean server, ChannelHandler childHandler) {
+    Http2MultiplexCodecBuilder(boolean server, ChannelHandler childHandler) {
         server(server);
         this.childHandler = Http2MultiplexCodec.checkSharable(checkNotNull(childHandler, "childHandler"));
+    }
+
+    /**
+     * Creates a builder for a HTTP/2 client.
+     */
+    public static Http2MultiplexCodecBuilder forClient(ChannelHandler childHandler) {
+        return new Http2MultiplexCodecBuilder(false, childHandler);
+    }
+
+    /**
+     * Creates a builder for a HTTP/2 server.
+     */
+    public static Http2MultiplexCodecBuilder forServer(ChannelHandler childHandler) {
+        return new Http2MultiplexCodecBuilder(true, childHandler);
     }
 
     @Override
@@ -136,6 +150,6 @@ public final class Http2MultiplexCodecBuilder
     protected Http2MultiplexCodec build(
             Http2ConnectionDecoder decoder, Http2ConnectionEncoder encoder, Http2Settings initialSettings) {
         return new Http2MultiplexCodec(
-                encoder, decoder, initialSettings, gracefulShutdownTimeoutMillis(), childHandler);
+                encoder, decoder, initialSettings, childHandler);
     }
 }

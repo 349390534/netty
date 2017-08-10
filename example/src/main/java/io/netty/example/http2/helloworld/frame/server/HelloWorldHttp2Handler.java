@@ -81,7 +81,7 @@ public class HelloWorldHttp2Handler extends ChannelDuplexHandler {
         }
 
         // Update the flowcontroller
-        ctx.write(new DefaultHttp2WindowUpdateFrame(data.flowControlledBytes()).stream(stream));
+        ctx.write(new DefaultHttp2WindowUpdateFrame(data.initialFlowControlledBytes()).stream(stream));
     }
 
     /**
