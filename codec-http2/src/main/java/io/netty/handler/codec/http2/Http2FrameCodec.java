@@ -30,11 +30,11 @@ import io.netty.handler.codec.http.HttpServerUpgradeHandler.UpgradeEvent;
 import io.netty.util.ReferenceCountUtil;
 
 import io.netty.util.ReferenceCounted;
+import io.netty.util.internal.PromiseNotificationUtil;
 import io.netty.util.internal.UnstableApi;
 import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 
-import static io.netty.handler.codec.http2.Http2CodecUtil.isOutboundStream;
 import static io.netty.handler.codec.http2.Http2CodecUtil.isStreamIdValid;
 import static io.netty.handler.codec.http2.Http2CodecUtil.HTTP_UPGRADE_STREAM_ID;
 
@@ -154,6 +154,7 @@ public class Http2FrameCodec extends Http2ConnectionHandler {
 
     /** Number of buffered streams if the {@link StreamBufferingEncoder} is used. **/
     private int numBufferedStreams;
+    private DefaultHttp2FrameStream frameStreamToInitialize;
 
     Http2FrameCodec(Http2ConnectionEncoder encoder, Http2ConnectionDecoder decoder, Http2Settings initialSettings) {
         super(decoder, encoder, initialSettings);
@@ -183,18 +184,8 @@ public class Http2FrameCodec extends Http2ConnectionHandler {
         connection().forEachActiveStream(new Http2StreamVisitor() {
             @Override
             public boolean visit(Http2Stream stream) {
-                Http2FrameStream stream2 = stream.getProperty(streamKey);
-                if (stream2 == null) {
-                    /**
-                     * This code is expected to almost never execute. However, in rare cases it's possible that a
-                     * stream is active without a {@link Http2FrameStream} object attached, as it's set in a listener of
-                     * the HEADERS frame write.
-                     */
-                    // TODO(buchgr): Remove once Http2Stream2 and Http2Stream are merged.
-                    return true;
-                }
                 try {
-                    return streamVisitor.visit(stream2);
+                    return streamVisitor.visit((Http2FrameStream) stream.getProperty(streamKey));
                 } catch (Throwable cause) {
                     onError(ctx, cause);
                     return false;
@@ -250,14 +241,16 @@ public class Http2FrameCodec extends Http2ConnectionHandler {
             try {
                 onUpgradeEvent(ctx, upgrade.retain());
                 Http2Stream stream = connection().stream(HTTP_UPGRADE_STREAM_ID);
-                // TODO: improve handler/stream lifecycle so that stream isn't active before handler added.
-                // The stream was already made active, but ctx may have been null so it wasn't initialized.
-                // https://github.com/netty/netty/issues/4942
-                new ConnectionListener().onStreamActive(stream);
+                if (stream.getProperty(streamKey) == null) {
+                    // TODO: improve handler/stream lifecycle so that stream isn't active before handler added.
+                    // The stream was already made active, but ctx may have been null so it wasn't initialized.
+                    // https://github.com/netty/netty/issues/4942
+                    onStreamActive0(stream);
+                }
                 upgrade.upgradeRequest().headers().setInt(
                         HttpConversionUtil.ExtensionHeaderNames.STREAM_ID.text(), HTTP_UPGRADE_STREAM_ID);
-                new InboundHttpToHttp2Adapter(connection(), decoder().frameListener())
-                        .channelRead(ctx, upgrade.upgradeRequest().retain());
+                InboundHttpToHttp2Adapter.handle(
+                        ctx, connection(), decoder().frameListener(), upgrade.upgradeRequest());
             } finally {
                 upgrade.release();
             }
@@ -341,61 +334,78 @@ public class Http2FrameCodec extends Http2ConnectionHandler {
 
     private void writeHeadersFrame(
             final ChannelHandlerContext ctx, Http2HeadersFrame headersFrame, final ChannelPromise promise) {
-        final int streamId;
-        final ChannelPromise writePromise;
+
         if (isStreamIdValid(headersFrame.stream().id())) {
-            streamId = headersFrame.stream().id();
-            writePromise = promise;
+            encoder().writeHeaders(ctx, headersFrame.stream().id(), headersFrame.headers(), headersFrame.padding(),
+                    headersFrame.isEndStream(), promise);
         } else {
             final DefaultHttp2FrameStream stream = (DefaultHttp2FrameStream) headersFrame.stream();
             final Http2Connection connection = connection();
-            streamId = connection.local().incrementAndGetNextStreamId();
+            final int streamId = connection.local().incrementAndGetNextStreamId();
             if (streamId < 0) {
                 promise.setFailure(new Http2NoMoreStreamIdsException());
                 return;
             }
             stream.id = streamId;
 
-            numBufferedStreams++;
-            // Ensure that the listener gets executed before any listeners a user might have attached.
+            // TODO: This depends on the fact that we currently add streams in a synchron manner. We should investigate
+            // how to refactor this later on when we consolidate some layers.
+            assert frameStreamToInitialize == null;
+            frameStreamToInitialize = stream;
+
             // TODO(buchgr): Once Http2Stream2 and Http2Stream are merged this is no longer necessary.
-            writePromise = ctx.newPromise();
-            writePromise.addListener(new ChannelFutureListener() {
-                @Override
-                public void operationComplete(ChannelFuture future) throws Exception {
-                    numBufferedStreams--;
+            final ChannelPromise writePromise = ctx.newPromise();
 
-                    Throwable cause = future.cause();
-                    if (cause == null) {
+            encoder().writeHeaders(ctx, streamId, headersFrame.headers(), headersFrame.padding(),
+                    headersFrame.isEndStream(), writePromise);
+            if (writePromise.isDone()) {
+                notifyHeaderWritePromise(writePromise, promise);
+            } else {
+                numBufferedStreams++;
 
-                        Http2Stream connectionStream  = connection.stream(streamId);
-                        if (connectionStream != null) {
-                            stream.setStreamAndProperty(streamKey, connectionStream);
-                            promise.setSuccess();
-                        } else {
-                            promise.setFailure(new Http2Exception.StreamException(
-                                    streamId, Http2Error.STREAM_CLOSED, "Stream not exists"));
-                        }
-                    } else {
-                        promise.setFailure(cause);
+                writePromise.addListener(new ChannelFutureListener() {
+                    @Override
+                    public void operationComplete(ChannelFuture future) throws Exception {
+                        numBufferedStreams--;
+
+                        notifyHeaderWritePromise(future, promise);
                     }
-                }
-            });
+                });
+            }
         }
-        encoder().writeHeaders(ctx, streamId, headersFrame.headers(), headersFrame.padding(),
-                                            headersFrame.isEndStream(), writePromise);
+    }
+
+    private static void notifyHeaderWritePromise(ChannelFuture future, ChannelPromise promise) {
+        Throwable cause = future.cause();
+        if (cause == null) {
+            promise.setSuccess();
+        } else {
+            promise.setFailure(cause);
+        }
+    }
+
+    private void onStreamActive0(Http2Stream stream) {
+        if (connection().local().isValidStreamId(stream.id())) {
+            return;
+        }
+
+        DefaultHttp2FrameStream stream2 = newStream().setStreamAndProperty(streamKey, stream);
+        onHttp2StreamStateChanged(ctx, stream2);
     }
 
     private final class ConnectionListener extends Http2ConnectionAdapter {
 
         @Override
-        public void onStreamActive(Http2Stream stream) {
-            if (connection().local().isValidStreamId(stream.id())) {
-                return;
-            }
+        public void onStreamAdded(Http2Stream stream) {
+             if (frameStreamToInitialize != null && stream.id() == frameStreamToInitialize.id()) {
+                 frameStreamToInitialize.setStreamAndProperty(streamKey, stream);
+                 frameStreamToInitialize = null;
+             }
+         }
 
-            DefaultHttp2FrameStream stream2 = newStream().setStreamAndProperty(streamKey, stream);
-            onHttp2StreamStateChanged(ctx, stream2);
+        @Override
+        public void onStreamActive(Http2Stream stream) {
+            onStreamActive0(stream);
         }
 
         @Override
