@@ -72,34 +72,53 @@ public final class PendingWriteQueue {
                 }
             };
         } else {
-            final ChannelOutboundBuffer buffer = ctx.channel().unsafe().outboundBuffer();
             final MessageSizeEstimator.Handle estimator = ctx.channel().config().getMessageSizeEstimator().newHandle();
-            tracker = new PendingTracker() {
-                @Override
-                public void incrementPendingOutboundBytes(long bytes) {
-                    // We need to guard against null as channel.unsafe().outboundBuffer() may returned null
-                    // if the channel was already closed when constructing the PendingWriteQueue.
-                    // See https://github.com/netty/netty/issues/3967
-                    if (buffer != null) {
-                        buffer.incrementPendingOutboundBytes(bytes);
+            final ChannelOutboundBuffer buffer = ctx.channel().unsafe().outboundBuffer();
+            if (buffer == null) {
+                tracker = new PendingTracker() {
+                    @Override
+                    public void incrementPendingOutboundBytes(long bytes) {
+                        // noop
                     }
-                }
 
-                @Override
-                public void decrementPendingOutboundBytes(long bytes) {
-                    // We need to guard against null as channel.unsafe().outboundBuffer() may returned null
-                    // if the channel was already closed when constructing the PendingWriteQueue.
-                    // See https://github.com/netty/netty/issues/3967
-                    if (buffer != null) {
-                        buffer.decrementPendingOutboundBytes(bytes);
+                    @Override
+                    public void decrementPendingOutboundBytes(long bytes) {
+                        // noop
                     }
-                }
 
-                @Override
-                public int size(Object msg) {
-                    return estimator.size(msg);
-                }
-            };
+                    @Override
+                    public int size(Object msg) {
+                        return estimator.size(msg);
+                    }
+                };
+            } else {
+                tracker = new PendingTracker() {
+                    @Override
+                    public void incrementPendingOutboundBytes(long bytes) {
+                        // We need to guard against null as channel.unsafe().outboundBuffer() may returned null
+                        // if the channel was already closed when constructing the PendingWriteQueue.
+                        // See https://github.com/netty/netty/issues/3967
+                        if (buffer != null) {
+                            buffer.incrementPendingOutboundBytes(bytes);
+                        }
+                    }
+
+                    @Override
+                    public void decrementPendingOutboundBytes(long bytes) {
+                        // We need to guard against null as channel.unsafe().outboundBuffer() may returned null
+                        // if the channel was already closed when constructing the PendingWriteQueue.
+                        // See https://github.com/netty/netty/issues/3967
+                        if (buffer != null) {
+                            buffer.decrementPendingOutboundBytes(bytes);
+                        }
+                    }
+
+                    @Override
+                    public int size(Object msg) {
+                        return estimator.size(msg);
+                    }
+                };
+            }
         }
     }
 

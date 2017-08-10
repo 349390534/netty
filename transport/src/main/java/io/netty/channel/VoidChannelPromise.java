@@ -18,9 +18,11 @@ package io.netty.channel;
 import io.netty.util.concurrent.AbstractFuture;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
+import io.netty.util.internal.UnstableApi;
 
 import java.util.concurrent.TimeUnit;
 
+@UnstableApi
 public final class VoidChannelPromise extends AbstractFuture<Void> implements ChannelPromise {
 
     private final Channel channel;

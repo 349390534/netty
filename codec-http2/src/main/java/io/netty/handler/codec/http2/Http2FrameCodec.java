@@ -346,8 +346,8 @@ public class Http2FrameCodec extends Http2ConnectionHandler {
             }
             stream.id = streamId;
 
-            // TODO: This depends on the fact that we currently add streams in a synchron manner. We should investigate
-            // how to refactor this later on when we consolidate some layers.
+            // TODO: This depends on the fact that the connection based API will create Http2Stream objects
+            // synchronously. We should investigate how to refactor this later on when we consolidate some layers.
             assert frameStreamToInitialize == null;
             frameStreamToInitialize = stream;
 

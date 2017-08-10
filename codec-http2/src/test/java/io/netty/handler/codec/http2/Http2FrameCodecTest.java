@@ -48,7 +48,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import static io.netty.handler.codec.http2.Http2CodecUtil.isStreamIdValid;
 import static io.netty.handler.codec.http2.Http2FrameStream.CONNECTION_STREAM;
-import static io.netty.util.ReferenceCountUtil.releaseLater;
 import static org.hamcrest.Matchers.instanceOf;
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
@@ -548,7 +547,7 @@ public class Http2FrameCodecTest {
     @Test
     public void receivePing() throws Http2Exception {
         ByteBuf data = Unpooled.buffer(8).writeLong(12345);
-        frameListener.onPingRead(http2HandlerCtx, releaseLater(data));
+        frameListener.onPingRead(http2HandlerCtx, data);
 
         Http2PingFrame pingFrame = inboundHandler.readInbound();
         assertNotNull(pingFrame);
@@ -556,6 +555,7 @@ public class Http2FrameCodecTest {
         assertEquals(data, pingFrame.content());
         assertFalse(pingFrame.ack());
         pingFrame.release();
+        data.release();
     }
 
     @Test

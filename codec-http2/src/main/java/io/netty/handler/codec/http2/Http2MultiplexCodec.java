@@ -33,6 +33,7 @@ import io.netty.channel.ChannelPromiseNotifier;
 import io.netty.channel.DefaultChannelConfig;
 import io.netty.channel.DefaultChannelPipeline;
 import io.netty.channel.DefaultMaxMessagesRecvByteBufAllocator;
+import io.netty.channel.DelegatingChannelPromiseNotifier;
 import io.netty.channel.EventLoop;
 import io.netty.channel.MessageSizeEstimator;
 import io.netty.channel.RecvByteBufAllocator;
@@ -115,7 +116,7 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
      * Number of bytes to consider non-payload messages. 9 is arbitrary, but also the minimum size of an HTTP/2 frame.
      * Primarily is non-zero.
      */
-    private static final int ARBITRARY_MESSAGE_SIZE = 9;
+    private static final int MIN_HTTP2_FRAME_SIZE = 9;
 
     /**
      * Returns the flow-control size for DATA frames, and 0 for all other frames.
@@ -128,7 +129,9 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
             @Override
             public int size(Object msg) {
                 return msg instanceof Http2DataFrame ?
-                        ((Http2DataFrame) msg).initialFlowControlledBytes() : ARBITRARY_MESSAGE_SIZE;
+                        // Guard against overflow.
+                        (int) min(Integer.MAX_VALUE, ((Http2DataFrame) msg).initialFlowControlledBytes() +
+                                (long) MIN_HTTP2_FRAME_SIZE) : MIN_HTTP2_FRAME_SIZE;
             }
         };
 
@@ -283,9 +286,7 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
     private void onHttp2StreamFrame(DefaultHttp2StreamChannel childChannel, Http2StreamFrame frame) {
         switch (childChannel.fireChildRead(frame)) {
             case READ_PROCESSED_BUT_STOP_READING:
-                if (childChannel.fireChildReadComplete()) {
-                    flushNeeded = true;
-                }
+                childChannel.fireChildReadComplete();
                 break;
             case READ_PROCESSED_OK_TO_PROCESS_MORE:
                 if (!childChannel.fireChannelReadPending) {
@@ -352,9 +353,7 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
                 if (childChannel.fireChannelReadPending) {
                     // Clear early in case fireChildReadComplete() causes it to need to be re-processed
                     childChannel.fireChannelReadPending = false;
-                    if (childChannel.fireChildReadComplete()) {
-                        flushNeeded = true;
-                    }
+                    childChannel.fireChildReadComplete();
                 }
                 childChannel.next = null;
                 current = current.next;
@@ -732,7 +731,7 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
             }
         }
 
-        boolean fireChildReadComplete() {
+        void fireChildReadComplete() {
             assert eventLoop().inEventLoop();
             try {
                 if (readInProgress) {
@@ -741,7 +740,7 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
                     unsafe().recvBufAllocHandle().readComplete();
                     pipeline().fireChannelReadComplete();
                 }
-                return flushPending;
+                flushNeeded |= flushPending;
             } finally {
                 inFireChannelReadComplete = false;
                 flushPending = false;
@@ -816,7 +815,7 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
                     return;
                 }
                 if (pendingClosePromise != null) {
-                    pendingClosePromise.addListener(new ChannelPromiseNotifier(promise));
+                    pendingClosePromise.addListener(new DelegatingChannelPromiseNotifier(promise));
                     return;
                 }
                 pendingClosePromise = promise;
@@ -913,7 +912,7 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
                     numBytesToBeConsumed = ((Http2DataFrame) frame).initialFlowControlledBytes();
                     allocHandle.lastBytesRead(numBytesToBeConsumed);
                 } else {
-                    allocHandle.lastBytesRead(ARBITRARY_MESSAGE_SIZE);
+                    allocHandle.lastBytesRead(MIN_HTTP2_FRAME_SIZE);
                 }
                 allocHandle.incMessagesRead(1);
                 pipeline().fireChannelRead(frame);
